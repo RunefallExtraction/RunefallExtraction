@@ -14,10 +14,12 @@ The assessed public interfaces did not demonstrate SQL injection, authentication
 
 The highest-priority confirmed configuration issue is a session cookie issued without the Secure attribute, combined with absent HSTS on sampled HTTPS pages. This creates a conditional transport-exposure risk. No session interception or takeover was performed or demonstrated.
 
+Revision 2 adds DNS attribution and six protocol-specific TLS handshakes. The public endpoint also accepts deprecated TLS 1.0 and TLS 1.1. DNS addresses belong to Cloudflare; the origin server remains unidentified.
+
 | Severity | Confirmed findings |
 | --- | --- |
 | Critical / High | 0 demonstrated |
-| Medium | 1 - cookie transport protection |
+| Medium | 2 - cookie transport protection; legacy TLS |
 | Low | 3 - CSP, password ceiling, HTTP resource URLs |
 | Informational | 2 - version disclosure, dependency governance |
 
@@ -167,11 +169,41 @@ Pin and review external dependencies, self-host vetted copies where practical, a
 | CORS | EXT-14/15/16: no Access-Control-Allow-Origin for untrusted Origin. | No permissive grant observed for those routes/origin. |
 | Sensitive paths | /.env, /.git/HEAD, composer files, Laravel log: 403. | Public route denial only; files may still exist on origin. |
 | Debug / errors | Ignition health route: 404; no sampled SQL/stack-error marker. | Not an exhaustive debug-route or error assessment. |
-| TLS / HTTP | Certificate validation passed; TLS 1.3 negotiated; HTTP root redirects. | One client/handshake, not a protocol/cipher or origin-server audit. |
+| TLS / HTTP | Certificate validation passed; TLS 1.0-1.3 accepted; HTTP root redirects. | Six added protocol handshakes; no exhaustive cipher or origin-server audit. |
 
 The observed session cookie is HttpOnly and SameSite=Strict. HTML responses have nosniff, SAMEORIGIN, a referrer policy, and restrictive camera/microphone/geolocation permissions. EXT-25 advertised an eight-request rate limit and EXT-15 a thirty-request limit. These headers were observed; thresholds, reset windows and bypass resistance were not exercised.
 
 Supplied-account attempt: AUTH-01 to AUTH-03 loaded login, submitted credentials once, and returned to /login. No authenticated page or private player record was accessed. Credentials and cookie values are omitted from evidence deliverables. The unsuccessful attempt is not classified as an application vulnerability.
+
+
+---
+
+## F-05 | Deprecated TLS protocols accepted
+
+Severity: MEDIUM | Confidence: HIGH | Status: OPEN | Revision 2
+
+The domain-specific TLS endpoint accepted version-pinned TLS 1.0 and TLS 1.1 handshakes with certificate validation enabled. Both returned IPv4 addresses reproduced this result using SNI deepgate.site. TLS 1.2 and TLS 1.3 also succeeded. This finding applies to the visitor-to-Cloudflare connection; origin TLS and host services were not assessed.
+
+| Protocol | Observed peer | Result / cipher |
+| --- | --- | --- |
+| TLSv1.0 | 188.114.96.1 | accepted / ECDHE-ECDSA-AES128-SHA |
+| TLSv1.1 | 188.114.96.1 | accepted / ECDHE-ECDSA-AES128-SHA |
+| TLSv1.2 | 188.114.96.1 | accepted / ECDHE-ECDSA-AES128-GCM-SHA256 |
+| TLSv1.3 | 188.114.96.1 | accepted / TLS_AES_256_GCM_SHA384 |
+
+Corroboration: 188.114.97.1 also accepted TLS 1.0 and TLS 1.1 with ECDHE-ECDSA-AES128-SHA. The scanner enabled deprecated protocol support only in its temporary client context. No website security settings were changed.
+
+Impact: permitting obsolete protocols retains weaker cryptographic options for legacy clients. RFC 8996 deprecates TLS 1.0 and TLS 1.1. Support alone does not prove that a modern client can be downgraded or that traffic was decrypted; neither attack was attempted. Reference R8.
+
+Remediation: set the Cloudflare minimum TLS version for this hostname to at least TLS 1.2 and retain TLS 1.3. Check supported player browsers and any applications that connect to the website before rollout. Configure origin TLS independently and validate proxy-to-origin encryption. Reference R9.
+
+Retest: SNI-based handshakes restricted to TLS 1.0 and TLS 1.1 fail; TLS 1.2 and TLS 1.3 continue to work; legitimate clients and account workflows remain operational.
+
+### DNS attribution and origin boundary
+
+A: 188.114.96.1 and 188.114.97.1. AAAA: 2a06:98c1:3120::1 and 2a06:98c1:3121::1. Nameservers: diva.ns.cloudflare.com and tate.ns.cloudflare.com. These addresses fall within Cloudflare-published proxy ranges (R10). The www hostname also resolves to those IPv4 addresses. A bounded DNS lookup for game, play, server and origin names returned no A records.
+
+No origin address was found in the inspected first-party scripts, captured pages or these limited DNS checks. This is not exhaustive origin discovery. A generic port scan against the proxy IPs would measure shared Cloudflare infrastructure, not establish the website host service inventory. No such scan was performed. Cloudflare documents this proxy behavior in R11.
 
 
 ---
@@ -181,6 +213,7 @@ Supplied-account attempt: AUTH-01 to AUTH-03 loaded login, submitted credentials
 | Priority | Owner action | Verification |
 | --- | --- | --- |
 | First | F-01: enable Secure session cookies; validate HTTPS/proxy handling; stage HSTS. | Inspect fresh cookies before and after login; verify HTTPS enforcement without breaking clients. |
+| First | F-05: raise domain-specific minimum TLS to 1.2. | TLS 1.0/1.1 rejected; TLS 1.2/1.3 accepted for the hostname. |
 | Next | F-04: replace HTTP resource URLs with HTTPS/relative URLs. | Browser network/console shows correct same-origin HTTPS requests. |
 | Next | F-02: inventory asset origins and roll out a tested CSP. | Report-only observations reviewed; enforced policy tested across workflows. |
 | Planned | F-03: assess website/game password compatibility and modernize policy. | Long passwords work end to end or documented limitations are mitigated. |
@@ -199,6 +232,8 @@ Infrastructure and database assurance require separate evidence about origin exp
 No evidence obtained in this scope shows that an attacker can dump the database. There is also insufficient evidence to exclude that possibility across untested routes and internal configuration. Retain parameterized queries and least-privilege database access; do not rely on username filtering or Cloudflare as substitutes. Reference R5.
 
 This edition records public-site coverage as requested by the owner after the supplied-account login could not be verified. It is not a compliance certification, a guarantee of security, or a report of completed authenticated testing.
+
+To extend into actual server-service testing, the origin IP must be established from owner-controlled DNS records, the hosting dashboard, or other verified asset records. Proxy IP attribution cannot substitute for an origin-server assessment. Read-only owner-side records are sufficient for this step; backend source is not required.
 
 
 ---
@@ -287,7 +322,7 @@ Evidence collection retained request outcomes, cookie attributes with values rem
 | deepgate-assessment-evidence.json | Sanitized case-level evidence and tool summary. |
 
 Evidence JSON SHA-256:
-ae8338058d19d93584c828e59cd971bbffe54f894c15fce37f4f8d67430fc999
+7d543d6680b395b68852cc7c3b014a98a9d934618c3971050da2f23d23f2de16
 
 REA evidence ID:
 ev_85ab1d9dbd6c05c2702dbf91d1d9622bfe561a4d28269b69ec661681ab0ac0fe
@@ -316,5 +351,17 @@ https://github.com/morluto/rea
 
 R7 | AI/LLM penetration-testing reference repository
 https://github.com/Mr-Infect/AI-penetration-testing
+
+R8 | IETF RFC 8996: Deprecating TLS 1.0 and TLS 1.1
+https://www.rfc-editor.org/rfc/rfc8996.html
+
+R9 | Cloudflare minimum TLS version
+https://developers.cloudflare.com/ssl/edge-certificates/additional-options/minimum-tls/
+
+R10 | Cloudflare published IPv4 and IPv6 ranges
+https://www.cloudflare.com/ips/
+
+R11 | Cloudflare DNS proxy status
+https://developers.cloudflare.com/dns/proxy-status/
 
 Source guidance was consulted on 14 October 2026. Technical recommendations are scoped to the observed configuration and require application-owner validation before deployment. No changes were deployed to the website.
